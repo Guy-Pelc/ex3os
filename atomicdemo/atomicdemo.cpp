@@ -46,6 +46,7 @@ int main(int argc, char** argv)
     printf("atomic counter: %d\n", atomic_counter.load());
     printf("bad counter: %d\n", bad_counter);
     
+    
     return 0;
 }
 
