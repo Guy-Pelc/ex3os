@@ -45,8 +45,6 @@ void printStatus()
 		cout<<"["<<static_cast<KChar*>(pair.first)->c<<":"<<static_cast<VCount*>(pair.second)->count<<"], ";
 	}
 
-
-
 	cout<<"end print"<<endl;
 
 }
@@ -144,10 +142,11 @@ JobHandle startMapReduceJob(const MapReduceClient& client,
 		sortedIntermediateVecs.pop_back();
 	}
 
+	jobState = {REDUCE_STAGE,100};
 	cout<<"reduce phase done"<<endl;
 	printStatus();
 
-	while(true);
+	// while(true);
 	return nullptr;
 }
 
