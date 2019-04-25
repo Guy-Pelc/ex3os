@@ -2,23 +2,62 @@
 #include "MapReduceFramework.h"
 #include "SampleClient.h"
 #include <algorithm>
-#include <deque>
+#include <pthread.h>
 
 using namespace std;
 
 // move this into object. now only supports 1 job//
+typedef struct {
+	IntermediateVec intermediateVec;
+	vector<IntermediateVec> sortedIntermediateVecs;
+	IntermediateVec curVec = {};
+} ThreadData;
 
-JobState jobState;
+//global
+
+//must have different context per job.
+class JobContext {
+public:
+	JobContext(	const MapReduceClient& client,
+				const InputVec& inputVec, 
+				OutputVec& outputVec,
+				int multiThreadLevel) : 
+				client(client),
+				inputVec(inputVec),
+				outputVec(outputVec) {
+		thread_data_arr = new ThreadData[multiThreadLevel];
+		threads_arr = new pthread_t[multiThreadLevel];
+	}
+
+	~JobContext(){
+		delete[] thread_data_arr;
+	}
+
+	const MapReduceClient& client;
+	const InputVec& inputVec; 
+	OutputVec& outputVec;
+	JobState jobState;
+
+
+	unsigned int mapCounter;
+	ThreadData* thread_data_arr;	
+	pthread_t* threads_arr;
+};
+
+
+
+
+// per thread
 IntermediateVec intermediateVec;
-unsigned int mapCounter;
 vector<IntermediateVec> sortedIntermediateVecs;
-
 IntermediateVec curVec = {};
 
 OutputVec _outputVec;
 
-void printStatus()
+void printStatus(void* _context)
 {
+	JobContext* context = (JobContext *)_context; 
+	JobState jobState = context->jobState;
 	cout<<"printStatus:"<<endl;
 	cout<<"jobState:"<<jobState.stage<<","<<jobState.percentage<<"%"<<endl;
 	cout<<"intermediateVec:";
@@ -72,12 +111,23 @@ bool isEqual(K2* i, K2* j)
 	// while(1); 	
 	return ((!(*i<*j)) && (!(*j<*i)));
 }
-JobHandle startMapReduceJob(const MapReduceClient& client,
-	 const InputVec& inputVec, OutputVec& outputVec,
-	int multiThreadLevel)
+
+void *doMap(void* _context)
 {
-	cout<<"startMapReduceJob"<<endl;
-	//init job object, currenly only 1 possible job, stored as global var.
+	
+}
+void *doJob(void* _context)
+{
+	JobContext* context = (JobContext*)_context;
+	JobState& jobState = context->jobState; 
+	unsigned int& mapCounter = context->mapCounter; 
+	
+	const MapReduceClient& client = context->client;
+	const InputVec& inputVec = context->inputVec;
+	OutputVec& outputVec = context->outputVec;
+
+
+
 	jobState = {MAP_STAGE,0};
 
 	//start mapping phase:
@@ -93,13 +143,13 @@ JobHandle startMapReduceJob(const MapReduceClient& client,
 	jobState.percentage =100* (double(mapCounter) / double(inputSize));
 
 
-	printStatus();
+	printStatus(_context);
 	}	
 
 	cout<<"entering sorting phase"<<endl;
 	sort(intermediateVec.begin(),intermediateVec.end(),[](IntermediatePair p1,IntermediatePair p2)
 		{return *(p1.first)<*(p2.first);});
-	printStatus();
+	printStatus(_context);
 
 	cout<<"entering shuffle and reduce phase"<<endl;
 	jobState = {REDUCE_STAGE,0};
@@ -123,7 +173,7 @@ JobHandle startMapReduceJob(const MapReduceClient& client,
 	sortedIntermediateVecs.push_back(curVec);
 	cout<<"curvecsize= "<< curVec.size()<<endl;
 	cout<<"sortedIntermediateVecs size: "<<sortedIntermediateVecs.size()<<endl;
-	printStatus();
+	printStatus(_context);
 
 	cout<<"entering reduce phase"<<endl;
 
@@ -144,10 +194,24 @@ JobHandle startMapReduceJob(const MapReduceClient& client,
 
 	jobState = {REDUCE_STAGE,100};
 	cout<<"reduce phase done"<<endl;
-	printStatus();
+	printStatus(_context);
+
+	pthread_exit(nullptr);
+}
+
+JobHandle startMapReduceJob(const MapReduceClient& client,
+	 const InputVec& inputVec, OutputVec& outputVec,
+	int multiThreadLevel)
+{
+	JobContext *context = new JobContext(client,inputVec,outputVec,multiThreadLevel);
+	cout<<"startMapReduceJob"<<endl;
+	//init job object, currenly only 1 possible job, stored as global var.
+	
+	pthread_create(&(context->threads_arr[0]),nullptr, &doJob,(void*)context);
+	
 
 	// while(true);
-	return nullptr;
+	return (void*)context;
 }
 
 void waitForJob(JobHandle job)
@@ -159,7 +223,8 @@ void waitForJob(JobHandle job)
 void getJobState(JobHandle job, JobState* state)
 {
 	cout<<"getJobState"<<endl;
-	*state = jobState;
+	JobContext* context = (JobContext *)job; 
+	*state = context->jobState;
 	return;
 
 }
@@ -167,5 +232,8 @@ void getJobState(JobHandle job, JobState* state)
 void closeJobHandle(JobHandle job)
 {
 	cout<<"closeJobHandle"<<endl;
+	JobContext* jc = (JobContext* )job;
+	delete jc;
+	return;
 }
 	
