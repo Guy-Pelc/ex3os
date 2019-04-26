@@ -22,11 +22,11 @@ int main(int argc, char** argv)
 	InputVec inputVec;
 	OutputVec outputVec;
 	VString s1("abc");
-	VString s2("def");
-	VString s3("ghi");
+	VString s2("sdaedfgef");
+	VString s3("ixcvhg");
 	VString s4("abc");
-	VString s5("def");
-	VString s6("ghi");
+	VString s5("dezxerzgf");
+	VString s6("ghxx  i");
 	// VString s1("This string is full of characters");
 	// VString s2("Multithreading is awesome");
 	// VString s3("race conditions are bad");
@@ -46,17 +46,12 @@ int main(int argc, char** argv)
 	{
         if (last_state.stage != state.stage || last_state.percentage != state.percentage){
             
-            // fflush(stdout);	
             printf("stage %d, %f%% \n",
 			state.stage, state.percentage);
-			// cout<<"there"<<endl;
         }
-		// cout<<"39"<<endl; 
 		usleep(100000);
-		// cout<<"41"<<endl; 
         last_state = state;
 		
-		fflush(stdout);	
 		getJobState(job, &state);
 
 	}
