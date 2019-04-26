@@ -9,14 +9,12 @@
 using namespace std;
 
 
-// move this into object. now only supports 1 job//
+
 class ThreadData {
 	
 public:
 	IntermediateVec intermediateVec;
 	
-	// IntermediateVec curVec = {};
-
 	const MapReduceClient& client;
 	const InputVec& inputVec; 
 	OutputVec& outputVec;
@@ -32,6 +30,7 @@ public:
 	pthread_mutex_t* mutexReducep;
 	Barrier* barrierp;
 	int& totalIPairs;
+	int& reducedIPairs;
 
 	ThreadData(	const MapReduceClient& client,
 			   	const InputVec& inputVec, 
@@ -46,7 +45,8 @@ public:
 			  	pthread_cond_t* cvp,
 			  	pthread_mutex_t* mutexReducep,
 			  	Barrier* barrierp,
-			  	int& totalIPairs) : 
+			  	int& totalIPairs,
+			  	int& reducedIPairs) : 
 				client(client),
 				inputVec(inputVec),
 				outputVec(outputVec),
@@ -60,7 +60,8 @@ public:
 				cvp(cvp),
 				mutexReducep(mutexReducep),
 				barrierp(barrierp),
-				totalIPairs(totalIPairs)
+				totalIPairs(totalIPairs),
+				reducedIPairs(reducedIPairs)
 				{
 					cout<<"ThreadData constructor "<<tid<<endl;
 				}
@@ -90,6 +91,7 @@ public:
 	pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
 	Barrier* barrier;
 	int totalIPairs=0;
+	int reducedIPairs = 0;
 
 	JobContext(	const MapReduceClient& client,
 				const InputVec& inputVec, 
@@ -117,7 +119,8 @@ public:
 													&cv,
 													&mutexReduce,
 													barrier,
-													totalIPairs);
+													totalIPairs,
+													reducedIPairs);
 		}
 		threads_arr = new pthread_t[multiThreadLevel];		
 	}
@@ -233,21 +236,6 @@ void doMap(void* _context)
 		else {break;}
 	}
 
-
-	// printf("stage %d, %f%% \n", jobState.stage, jobState.percentage);
-
-
-	// while(mapCounter < inputSize)
-	// {
-	// 	firstPair = inputVec[mapCounter];
-	// 	mapCounter++;
-	// 	cout<<"mapCounter:"<<mapCounter<<endl;
-	// 	client.map(firstPair.first,firstPair.second,_context);
-		
-	// 	jobState.percentage =100* (double(mapCounter) / double(inputSize));
-	// 	printf("stage %d, %f%% \n", jobState.stage, jobState.percentage);
-	// }
-
 	return;
 }
 
@@ -343,6 +331,7 @@ void doReduce(void* _context){
 	JobState& jobState = context->jobState; 
 
 	int& totalIPairs = context->totalIPairs;
+	int& reducedIPairs = context->reducedIPairs;
 
 	pthread_mutex_t* mutexp =  context->mutexp;
 	pthread_cond_t* cvp = context->cvp;
@@ -358,7 +347,8 @@ void doReduce(void* _context){
 			cout<<"reducing key: "<<static_cast<KChar*>(sortedIntermediateVecs.back().back().first)->c<<endl;
 			client.reduce(&sortedIntermediateVecs.back(),_context);
 			sortedIntermediateVecs.pop_back();
-			jobState.percentage += 100*curVecSize/float(totalIPairs);
+			reducedIPairs += curVecSize;
+			jobState.percentage = 100*reducedIPairs/float(totalIPairs);
 		pthread_mutex_unlock(mutexp);
 	}
 }
