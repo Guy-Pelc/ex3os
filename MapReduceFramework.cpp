@@ -1,6 +1,6 @@
 #include <iostream>
 #include "MapReduceFramework.h"
-#include "SampleClient.h"
+// #include "SampleClient.h"
 #include <algorithm>
 #include <pthread.h>
 #include <atomic>
