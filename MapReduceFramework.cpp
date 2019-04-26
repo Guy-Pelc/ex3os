@@ -1,6 +1,6 @@
 #include <iostream>
 #include "MapReduceFramework.h"
-// #include "SampleClient.h"
+// #include "SampleClient.h" 	
 #include <algorithm>
 #include <pthread.h>
 #include <atomic>
@@ -125,7 +125,7 @@ void emit2 (K2* key, V2* value, void* context){
 	sc->intermediateVec_arr[tid].push_back({key,value});
 
 
-	cout<<"intermediateVec_arr["<<tid<<"] added "<< static_cast<KChar*>(key)->c<<endl;
+	// cout<<"intermediateVec_arr["<<tid<<"] added "<< static_cast<KChar*>(key)->c<<endl;
 }
 
 void emit3 (K3* key, V3* value, void* context){
@@ -258,13 +258,13 @@ for (int i=0;i<sc->multiThreadLevel;++i)
 		}
 		pthread_mutex_lock(mutexp);
 			sortedIntermediateVecs.push_back(curSortedVec);
-			cout<<"produced sortedVec: "<<"{";
-			//print sortedvec:
-			for (unsigned int i=0;i<curSortedVec.size();++i){
-				cout<<"("<<	static_cast<KChar*>(curSortedVec[i].first)->c<<","<<
-							static_cast<VCount*>(curSortedVec[i].second)->count<<") ";
-			}
-			cout<<"}"<<endl;
+			// cout<<"produced sortedVec: "<<"{";
+			// //print sortedvec:
+			// for (unsigned int i=0;i<curSortedVec.size();++i){
+			// 	cout<<"("<<	static_cast<KChar*>(curSortedVec[i].first)->c<<","<<
+			// 				static_cast<VCount*>(curSortedVec[i].second)->count<<") ";
+			// }
+			// cout<<"}"<<endl;
 			pthread_cond_broadcast(cvp);
 		pthread_mutex_unlock(mutexp);
 		curSortedVec.clear();
@@ -299,8 +299,8 @@ void doReduce(void* context){
 				pthread_cond_wait(cvp,mutexp);
 			}
 			curVecSize = sortedIntermediateVecs.back().size();
-			cout<<"curVecSize: "<<curVecSize<<endl;
-			cout<<"reducing key: "<<static_cast<KChar*>(sortedIntermediateVecs.back().back().first)->c<<endl;
+			// cout<<"curVecSize: "<<curVecSize<<endl;
+			// cout<<"reducing key: "<<static_cast<KChar*>(sortedIntermediateVecs.back().back().first)->c<<endl;
 			client.reduce(&sortedIntermediateVecs.back(),context);
 			sortedIntermediateVecs.pop_back();
 			reducedIPairs += curVecSize;

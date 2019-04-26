@@ -1,0 +1,20 @@
+stuff to correct:
+
+V stage 0- work with 0 threads
+stage 1-  work with one thread
+stage 2-  work with 2 threads
+stage 3- work with 3 threads
+stage 4- work with n threads
+
+
+stuff to check:
+-using pthreads
+-mutexes and cv
+-atomic variable (why can there be only one?) 
+-barriers
+
+-read docs and check all is working
+-read ex3 description
+- read forum questions.
+-create my own client.
+-ask tomer for tests
