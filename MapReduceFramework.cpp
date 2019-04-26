@@ -9,81 +9,18 @@
 using namespace std;
 
 
-
-class ThreadData {
-	
+class SharedContext{
 public:
-	IntermediateVec intermediateVec;
-	
 	const MapReduceClient& client;
 	const InputVec& inputVec; 
 	OutputVec& outputVec;
-	JobState& jobState;
-	const int tid;
-	atomic<unsigned int>& mapCounter; 
-	vector<IntermediateVec>& sortedIntermediateVecs;
-	ThreadData** thread_data_parr;
-	const int multiThreadLevel;
 
-	pthread_mutex_t* mutexp;
-	pthread_cond_t* cvp;
-	pthread_mutex_t* mutexReducep;
-	Barrier* barrierp;
-	int& totalIPairs;
-	int& reducedIPairs;
-
-	ThreadData(	const MapReduceClient& client,
-			   	const InputVec& inputVec, 
-			  	OutputVec& outputVec,
-			  	JobState& jobState, 
-			  	const int tid,
-			  	atomic<unsigned int>& mapCounter,
-			  	vector<IntermediateVec>& sortedIntermediateVecs,
-			  	ThreadData** thread_data_parr,
-			  	const int multiThreadLevel,
-			  	pthread_mutex_t* mutexp,
-			  	pthread_cond_t* cvp,
-			  	pthread_mutex_t* mutexReducep,
-			  	Barrier* barrierp,
-			  	int& totalIPairs,
-			  	int& reducedIPairs) : 
-				client(client),
-				inputVec(inputVec),
-				outputVec(outputVec),
-				jobState(jobState),
-				tid(tid),
-				mapCounter(mapCounter),
-				sortedIntermediateVecs(sortedIntermediateVecs),
-				thread_data_parr(thread_data_parr),
-				multiThreadLevel(multiThreadLevel),
-				mutexp(mutexp),
-				cvp(cvp),
-				mutexReducep(mutexReducep),
-				barrierp(barrierp),
-				totalIPairs(totalIPairs),
-				reducedIPairs(reducedIPairs)
-				{
-					cout<<"ThreadData constructor "<<tid<<endl;
-				}
-
-
-};
-
-
-//global
-
-//must have different context per job.
-class JobContext {
-public:
-
-	const MapReduceClient& client;
-	const InputVec& inputVec; 
-	OutputVec& outputVec;
 	JobState jobState;
 	const int multiThreadLevel;
+
 	vector<IntermediateVec> sortedIntermediateVecs;
 	atomic<unsigned int> mapCounter;
-	ThreadData** thread_data_parr;	
+	IntermediateVec* intermediateVec_arr;	
 	pthread_t* threads_arr;
 
 	pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -92,51 +29,54 @@ public:
 	Barrier* barrier;
 	int totalIPairs=0;
 	int reducedIPairs = 0;
+	int totalMapped = 0;
 
-	JobContext(	const MapReduceClient& client,
+
+	SharedContext(
+				const MapReduceClient& client,
 				const InputVec& inputVec, 
 				OutputVec& outputVec,
 				const int multiThreadLevel) : 
+
 				client(client),
 				inputVec(inputVec),
 				outputVec(outputVec),
 				multiThreadLevel(multiThreadLevel),
 				mapCounter(0) {
-		cout<<"jobContext constructor"<<endl;
-		barrier = new Barrier(multiThreadLevel);
-		thread_data_parr = new ThreadData*[multiThreadLevel];
-		for (int i=0;i<multiThreadLevel;++i){
-			thread_data_parr[i] = new ThreadData(	client, 
-													inputVec, 
-													outputVec, 
-													jobState, 
-													i, 
-													mapCounter,
-													sortedIntermediateVecs, 
-													thread_data_parr,
-													multiThreadLevel,
-													&mutex,
-													&cv,
-													&mutexReduce,
-													barrier,
-													totalIPairs,
-													reducedIPairs);
-		}
-		threads_arr = new pthread_t[multiThreadLevel];		
-	}
-	
-	
-	~JobContext(){
-		for (int i=0;i<multiThreadLevel;++i)
-		{
-			delete thread_data_parr[i];
-		}
-		delete[] thread_data_parr;
-	}
 
+		cout<<"SharedContext constructor"<<endl;
+		barrier = new Barrier(multiThreadLevel);
+		intermediateVec_arr = new IntermediateVec[multiThreadLevel];
+		
+		threads_arr = new pthread_t[multiThreadLevel];	
+	}
 };
 
+typedef struct {
+	SharedContext* sharedContextp;
+	int tid;
+} ThreadContext;
 
+class JobContext {
+public:
+	SharedContext* sharedContextp ;
+	ThreadContext* threadContext_arr;
+
+	JobContext(	const MapReduceClient& client,
+				const InputVec& inputVec, 
+				OutputVec& outputVec,
+				const int multiThreadLevel) {
+		sharedContextp = new SharedContext(client, inputVec,outputVec,multiThreadLevel);
+
+		threadContext_arr = new ThreadContext[multiThreadLevel];
+		for (int i=0;i<multiThreadLevel;++i){
+			threadContext_arr[i] = {sharedContextp,i};
+		}
+	
+	}
+};
+
+/*
 void printStatus(void* _context)
 {
 	ThreadData* context = (ThreadData *)_context; 
@@ -174,24 +114,28 @@ void printStatus(void* _context)
 	}
 
 	cout<<"end print"<<endl;
-
 }
+*/
 
 void emit2 (K2* key, V2* value, void* context){
 	// cout<<"emit2"<<endl;
-	ThreadData* _context = (ThreadData*) context;
-	_context->intermediateVec.push_back({key,value});
+	ThreadContext* tc = (ThreadContext*) context;
+	SharedContext* sc = tc-> sharedContextp;
+	int tid = tc->tid;
+	sc->intermediateVec_arr[tid].push_back({key,value});
 
 
-	cout<<"intermediateVec["<<_context->tid<<"] added "<< static_cast<KChar*>(key)->c<<endl;
+	cout<<"intermediateVec_arr["<<tid<<"] added "<< static_cast<KChar*>(key)->c<<endl;
 }
 
 void emit3 (K3* key, V3* value, void* context){
-	ThreadData* _context = (ThreadData*) context;
-	pthread_mutex_t* mutexReducep = _context->mutexReducep;
+	ThreadContext* tc = (ThreadContext*) context;
+	SharedContext* sc = tc-> sharedContextp;
+	
+	pthread_mutex_t* mutexReducep = &(sc->mutexReduce);
 
 	pthread_mutex_lock(mutexReducep);
-		_context->outputVec.push_back({key,value});
+		sc->outputVec.push_back({key,value});
 	pthread_mutex_unlock(mutexReducep);
 	// cout<<"end emit3"<<endl;
 }
@@ -209,28 +153,33 @@ bool isEqual(K2* i, K2* j)
 	return ((!(*i<*j)) && (!(*j<*i)));
 }
 
-void doMap(void* _context)
+void doMap(void* context)
 {
 	cout<<"doMap"<<endl;
-	ThreadData* context = (ThreadData *)_context;
-	JobState& jobState = context->jobState; 
-	pthread_mutex_t* mutexp = context->mutexp;
-	atomic<unsigned int>& mapCounter = context->mapCounter; 
-	
-	const MapReduceClient& client = context->client;
-	const InputVec& inputVec = context->inputVec;
-	
+
+	ThreadContext* tc = (ThreadContext*) context;
+	SharedContext* sc = tc-> sharedContextp;
+
+	JobState& jobState = sc->jobState; 
+	pthread_mutex_t* mutexp = &(sc->mutex);
+	atomic<unsigned int>& mapCounter = sc->mapCounter; 
+	const MapReduceClient& client = sc->client;
+	const InputVec& inputVec = sc->inputVec;
+	int& totalMapped = sc->totalMapped;
 
 	unsigned int inputSize = inputVec.size();
 	InputPair firstPair;
+
+	
 
 	while(1){
 		unsigned int oldVal = mapCounter++;
 		if (oldVal < inputSize){
 			firstPair = inputVec[oldVal];
-			client.map(firstPair.first,firstPair.second,_context);
+			client.map(firstPair.first,firstPair.second,context);
 			pthread_mutex_lock(mutexp);
-				jobState.percentage += 100/(float)inputVec.size();
+				totalMapped += 1;
+				jobState.percentage = 100*totalMapped/(float)inputVec.size();
 			pthread_mutex_unlock(mutexp);
 		}
 		else {break;}
@@ -241,15 +190,18 @@ void doMap(void* _context)
 
 /* returns max key or nullptr if all iVecs are empty
 */
-K2* getMaxKey(void* _context){
-	ThreadData* context = (ThreadData*)_context;
-	K2* maxKeyp = nullptr; //context->thread_data_parr[0]->intermediateVec.back().first; 
+K2* getMaxKey(void* context){
+	ThreadContext* tc = (ThreadContext*) context;
+	SharedContext* sc = tc-> sharedContextp;
+	
+	K2* maxKeyp = nullptr; 
 	K2* compKeyp;
 	IntermediateVec iVec;
-	for (int i=0;i<context->multiThreadLevel;++i){
-		iVec = context->thread_data_parr[i]->intermediateVec;
+
+	for (int i=0;i<sc->multiThreadLevel;++i){
+		iVec = sc->intermediateVec_arr[i];
 		if (!iVec.empty()){
-			compKeyp = context->thread_data_parr[i]->intermediateVec.back().first;	
+			compKeyp = sc->intermediateVec_arr[i].back().first;	
 			// cout<<"compkey is:"<<static_cast<KChar*>(compKeyp)->c<<endl;
 			if (maxKeyp == nullptr) {
 				maxKeyp = compKeyp; 
@@ -266,32 +218,34 @@ K2* getMaxKey(void* _context){
 	return maxKeyp;
 }
 
-void doShuffle(void* _context){
+void doShuffle(void* context){
 	// cout<<endl<<"entering doShuffle"<<endl;
 
-	ThreadData* context = (ThreadData*)_context;
-	JobState& jobState = context->jobState; 
-	vector<IntermediateVec>& sortedIntermediateVecs = context->sortedIntermediateVecs;
+	ThreadContext* tc = (ThreadContext*) context;
+	SharedContext* sc = tc-> sharedContextp;
+	
+	JobState& jobState = sc->jobState; 
+	vector<IntermediateVec>& sortedIntermediateVecs = sc->sortedIntermediateVecs;
 
-	pthread_mutex_t* mutexp =  context->mutexp;
-	pthread_cond_t* cvp = context->cvp;
+	pthread_mutex_t* mutexp =  &(sc->mutex);
+	pthread_cond_t* cvp = &(sc->cv);
 
-	int& totalIPairs = context->totalIPairs;
+	int& totalIPairs = sc->totalIPairs;
 	//get totalIPairs
 	totalIPairs = 0;
-for (int i=0;i<context->multiThreadLevel;++i)
+for (int i=0;i<sc->multiThreadLevel;++i)
 {
-	totalIPairs += context->thread_data_parr[i]->intermediateVec.size();
+	totalIPairs += sc->intermediateVec_arr[i].size();
 }
 // cout<<"totalIPairs = "<<totalIPairs<<endl;
 
 	jobState = {REDUCE_STAGE,0};
 
-	K2* curKeyp = getMaxKey(_context);
+	K2* curKeyp = getMaxKey(context);
 	IntermediateVec curSortedVec;
 	while (!(curKeyp==nullptr)){
-		for (int i=0;i<context->multiThreadLevel;++i){
-			IntermediateVec &intermediateVec =  context->thread_data_parr[i]->intermediateVec;
+		for (int i=0;i<sc->multiThreadLevel;++i){
+			IntermediateVec &intermediateVec =  sc->intermediateVec_arr[i];
 			while( !intermediateVec.empty()){
 				// cout<<"i_size:"<<intermediateVec.size()<<endl;
 				if (isEqual(intermediateVec.back().first, curKeyp)){
@@ -306,7 +260,7 @@ for (int i=0;i<context->multiThreadLevel;++i)
 			sortedIntermediateVecs.push_back(curSortedVec);
 			cout<<"produced sortedVec: "<<"{";
 			//print sortedvec:
-			for (int i=0;i<curSortedVec.size();++i){
+			for (unsigned int i=0;i<curSortedVec.size();++i){
 				cout<<"("<<	static_cast<KChar*>(curSortedVec[i].first)->c<<","<<
 							static_cast<VCount*>(curSortedVec[i].second)->count<<") ";
 			}
@@ -314,7 +268,7 @@ for (int i=0;i<context->multiThreadLevel;++i)
 			pthread_cond_broadcast(cvp);
 		pthread_mutex_unlock(mutexp);
 		curSortedVec.clear();
-		curKeyp = getMaxKey(_context);
+		curKeyp = getMaxKey(context);
 		// cout<<"curkey is:"<<static_cast<KChar*>(curKeyp)->c<<endl;
 	}
 	
@@ -323,18 +277,20 @@ for (int i=0;i<context->multiThreadLevel;++i)
 	//get maxkey
 }
 
-void doReduce(void* _context){
+void doReduce(void* context){
 	// cout<<"doReduce"<<endl;
-	ThreadData* context = (ThreadData*)_context;
-	vector<IntermediateVec>& sortedIntermediateVecs = context->sortedIntermediateVecs; 
-	const MapReduceClient& client = context->client;
-	JobState& jobState = context->jobState; 
+	ThreadContext* tc = (ThreadContext*) context;
+	SharedContext* sc = tc-> sharedContextp;
+	
+	vector<IntermediateVec>& sortedIntermediateVecs = sc->sortedIntermediateVecs; 
+	const MapReduceClient& client = sc->client;
+	JobState& jobState = sc->jobState; 
 
-	int& totalIPairs = context->totalIPairs;
-	int& reducedIPairs = context->reducedIPairs;
+	int& totalIPairs = sc->totalIPairs;
+	int& reducedIPairs = sc->reducedIPairs;
 
-	pthread_mutex_t* mutexp =  context->mutexp;
-	pthread_cond_t* cvp = context->cvp;
+	pthread_mutex_t* mutexp =  &(sc->mutex);
+	pthread_cond_t* cvp = &(sc->cv);
 	
 	int curVecSize;
 	while(1){
@@ -345,7 +301,7 @@ void doReduce(void* _context){
 			curVecSize = sortedIntermediateVecs.back().size();
 			cout<<"curVecSize: "<<curVecSize<<endl;
 			cout<<"reducing key: "<<static_cast<KChar*>(sortedIntermediateVecs.back().back().first)->c<<endl;
-			client.reduce(&sortedIntermediateVecs.back(),_context);
+			client.reduce(&sortedIntermediateVecs.back(),context);
 			sortedIntermediateVecs.pop_back();
 			reducedIPairs += curVecSize;
 			jobState.percentage = 100*reducedIPairs/float(totalIPairs);
@@ -353,42 +309,45 @@ void doReduce(void* _context){
 	}
 }
 
-void *doJob(void* _context)
+void *doJob(void* context)
 {
 	cout<<"doJob"<<endl;
 
-	ThreadData* context = (ThreadData*)_context;
-	JobState& jobState = context->jobState; 
+	ThreadContext* tc = (ThreadContext*) context;
+	SharedContext* sc = tc-> sharedContextp;
+	int tid = tc->tid;
+
+	JobState& jobState = sc->jobState; 
 	
-	IntermediateVec& intermediateVec= context->intermediateVec;
+	IntermediateVec& intermediateVec= sc->intermediateVec_arr[tid];
 
-	Barrier* barrierp = context->barrierp;
+	Barrier* barrierp = sc->barrier;
 
-	if (context->tid == 0){cout<<"entering map phase"<<endl;}
-	context->jobState = {MAP_STAGE,0};
+	if (tid == 0){cout<<"entering map phase"<<endl;}
+	sc->jobState = {MAP_STAGE,0};
 
-	doMap(_context);	
+	doMap(context);	
 	
-	if (context->tid==0){cout<<"entering sort phase"<<endl;}
+	if (tid==0){cout<<"entering sort phase"<<endl;}
 	
 	sort(intermediateVec.begin(),intermediateVec.end(),[](IntermediatePair p1,IntermediatePair p2)
 		{return *(p1.first)<*(p2.first);});
 
 
 	barrierp->barrier();
-	cout<<"thread "<<context->tid<<" out of barrier"<<endl;
+	cout<<"thread "<<tid<<" out of barrier"<<endl;
 
 
-	if (context->tid ==0){
+	if (tid ==0){
 
 		jobState = {REDUCE_STAGE,0};
 		cout<<"entering shuffle and reduce phase"<<endl;
-		printStatus(_context);
+		// printStatus(context);
 
-		doShuffle(_context);
+		doShuffle(context);
 	}		
 
-	doReduce(_context);
+	doReduce(context);
 
 
 
@@ -400,17 +359,18 @@ JobHandle startMapReduceJob(const MapReduceClient& client,
 	int multiThreadLevel)
 {
 	cout<<"startMapReduceJob"<<endl;
-	JobContext *context = new JobContext(client,inputVec,outputVec,multiThreadLevel);
+	JobContext *jobContext = new JobContext(client,inputVec,outputVec,multiThreadLevel);
 	
 
 	printf("stage %d, %f%% \n", 
-		context->jobState.stage, context->jobState.percentage);
+		jobContext->sharedContextp->jobState.stage, jobContext->sharedContextp->jobState.percentage);
 
 	for (int i=0;i<multiThreadLevel;++i){
-		pthread_create(&(context->threads_arr[i]),nullptr, &doJob,(void*)context->thread_data_parr[i]);
+		ThreadContext& tc = jobContext->threadContext_arr[i]; 
+		pthread_create(&(jobContext->sharedContextp->threads_arr[i]),nullptr, &doJob,(void*)&tc);
 	}
 	
-	return (void*)context;
+	return (void*)jobContext;
 }
 
 void waitForJob(JobHandle job)
@@ -423,7 +383,7 @@ void getJobState(JobHandle job, JobState* state)
 {
 		// cout<<"getJobState"<<endl;
 	JobContext* context = (JobContext *)job; 
-	*state = context->jobState;
+	*state = context->sharedContextp->jobState;
 	return;
 
 }
@@ -463,6 +423,7 @@ void test2()
 	// bool res2 = b<*k3p;
 	// cout<<res<<endl;
 }
+/*
 void test(){
 
 	cout<<"hi from test"<<endl;
@@ -536,3 +497,4 @@ void test(){
 	
 	return;
 }
+*/
