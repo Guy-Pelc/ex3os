@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <atomic>
 #include "Barrier.h"
+#include <semaphore.h>
 
 using namespace std;
 
@@ -24,12 +25,16 @@ public:
 	pthread_t* threads_arr;
 
 	pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-	pthread_mutex_t mutexReduce = PTHREAD_MUTEX_INITIALIZER;
+	pthread_mutex_t outMutex = PTHREAD_MUTEX_INITIALIZER;
 	pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
+
 	Barrier* barrier;
 	int totalIPairs=0;
 	int reducedIPairs = 0;
 	int totalMapped = 0;
+
+	pthread_mutex_t jsMutex = PTHREAD_MUTEX_INITIALIZER;
+	sem_t sem;
 
 
 	SharedContext(
@@ -44,11 +49,20 @@ public:
 				multiThreadLevel(multiThreadLevel),
 				mapCounter(0) {
 
-		cout<<"SharedContext constructor"<<endl;
+		// cout<<"SharedContext constructor"<<endl;
 		barrier = new Barrier(multiThreadLevel);
 		intermediateVec_arr = new IntermediateVec[multiThreadLevel];
 		
-		threads_arr = new pthread_t[multiThreadLevel];	
+		threads_arr = new pthread_t[multiThreadLevel];
+
+		sem_init(&sem,0,0);	
+	}
+
+	~SharedContext(){
+		// cout<<"sharedContext destructor"<<endl;
+		delete barrier;
+		delete[] intermediateVec_arr;
+		delete[] threads_arr;
 	}
 };
 
@@ -72,7 +86,12 @@ public:
 		for (int i=0;i<multiThreadLevel;++i){
 			threadContext_arr[i] = {sharedContextp,i};
 		}
-	
+	}
+	~JobContext(){
+		// cout<<"JobContext destructor"<<endl;
+		delete threadContext_arr;
+		delete sharedContextp;
+
 	}
 };
 
@@ -132,11 +151,11 @@ void emit3 (K3* key, V3* value, void* context){
 	ThreadContext* tc = (ThreadContext*) context;
 	SharedContext* sc = tc-> sharedContextp;
 	
-	pthread_mutex_t* mutexReducep = &(sc->mutexReduce);
+	pthread_mutex_t* outMutexp = &(sc->outMutex);
 
-	pthread_mutex_lock(mutexReducep);
+	pthread_mutex_lock(outMutexp);
 		sc->outputVec.push_back({key,value});
-	pthread_mutex_unlock(mutexReducep);
+	pthread_mutex_unlock(outMutexp);
 	// cout<<"end emit3"<<endl;
 }
 
@@ -155,13 +174,13 @@ bool isEqual(K2* i, K2* j)
 
 void doMap(void* context)
 {
-	cout<<"doMap"<<endl;
+	// cout<<"doMap"<<endl;
 
 	ThreadContext* tc = (ThreadContext*) context;
 	SharedContext* sc = tc-> sharedContextp;
 
 	JobState& jobState = sc->jobState; 
-	pthread_mutex_t* mutexp = &(sc->mutex);
+	pthread_mutex_t* jsMutexp = &(sc->jsMutex);
 	atomic<unsigned int>& mapCounter = sc->mapCounter; 
 	const MapReduceClient& client = sc->client;
 	const InputVec& inputVec = sc->inputVec;
@@ -170,17 +189,17 @@ void doMap(void* context)
 	unsigned int inputSize = inputVec.size();
 	InputPair firstPair;
 
-	
+
 
 	while(1){
 		unsigned int oldVal = mapCounter++;
 		if (oldVal < inputSize){
 			firstPair = inputVec[oldVal];
 			client.map(firstPair.first,firstPair.second,context);
-			pthread_mutex_lock(mutexp);
+			pthread_mutex_lock(jsMutexp);
 				totalMapped += 1;
 				jobState.percentage = 100*totalMapped/(float)inputVec.size();
-			pthread_mutex_unlock(mutexp);
+			pthread_mutex_unlock(jsMutexp);
 		}
 		else {break;}
 	}
@@ -228,7 +247,7 @@ void doShuffle(void* context){
 	vector<IntermediateVec>& sortedIntermediateVecs = sc->sortedIntermediateVecs;
 
 	pthread_mutex_t* mutexp =  &(sc->mutex);
-	pthread_cond_t* cvp = &(sc->cv);
+	sem_t* sem = &(sc->sem);
 
 	int& totalIPairs = sc->totalIPairs;
 	//get totalIPairs
@@ -256,6 +275,14 @@ for (int i=0;i<sc->multiThreadLevel;++i)
 				break;
 			}
 		}
+
+		pthread_mutex_lock(mutexp);
+			sortedIntermediateVecs.push_back(curSortedVec);
+		pthread_mutex_unlock(mutexp);
+		// cout<<"posting to semaphore"<<endl;
+		sem_post(sem);
+		
+		/*
 		pthread_mutex_lock(mutexp);
 			sortedIntermediateVecs.push_back(curSortedVec);
 			// cout<<"produced sortedVec: "<<"{";
@@ -267,12 +294,14 @@ for (int i=0;i<sc->multiThreadLevel;++i)
 			// cout<<"}"<<endl;
 			pthread_cond_broadcast(cvp);
 		pthread_mutex_unlock(mutexp);
+		*/
 		curSortedVec.clear();
 		curKeyp = getMaxKey(context);
 		// cout<<"curkey is:"<<static_cast<KChar*>(curKeyp)->c<<endl;
+		
 	}
 	
-	cout<<"shuffling done"<<endl;
+	// cout<<"shuffling done"<<endl;
 
 	//get maxkey
 }
@@ -290,10 +319,38 @@ void doReduce(void* context){
 	int& reducedIPairs = sc->reducedIPairs;
 
 	pthread_mutex_t* mutexp =  &(sc->mutex);
-	pthread_cond_t* cvp = &(sc->cv);
-	
+	sem_t* sem = &(sc->sem);
 	int curVecSize;
+	IntermediateVec curIVec;
+	pthread_mutex_t* jsMutexp = &(sc->jsMutex);
+
+
+	while(1){	
+	sem_wait(sem);
+	if (jobState.percentage == 100) {sem_post(sem); return;}
+
+
+	pthread_mutex_lock(mutexp);
+		curIVec = sortedIntermediateVecs.back();
+		sortedIntermediateVecs.pop_back();
+	pthread_mutex_unlock(mutexp);
+
+	curVecSize = curIVec.size();
+	client.reduce(&curIVec,context);
+
+	pthread_mutex_lock(jsMutexp);
+		reducedIPairs += curVecSize;
+		jobState.percentage = 100*reducedIPairs/float(totalIPairs);
+	pthread_mutex_unlock(jsMutexp);
+		if (jobState.percentage == 100){sem_post(sem); return;}
+	}
+
+	
+
+
+	/*
 	while(1){
+
 		pthread_mutex_lock(mutexp);
 			while(sortedIntermediateVecs.empty()){
 				pthread_cond_wait(cvp,mutexp);
@@ -307,11 +364,12 @@ void doReduce(void* context){
 			jobState.percentage = 100*reducedIPairs/float(totalIPairs);
 		pthread_mutex_unlock(mutexp);
 	}
+	*/
 }
 
 void *doJob(void* context)
 {
-	cout<<"doJob"<<endl;
+	// cout<<"doJob"<<endl;
 
 	ThreadContext* tc = (ThreadContext*) context;
 	SharedContext* sc = tc-> sharedContextp;
@@ -323,25 +381,25 @@ void *doJob(void* context)
 
 	Barrier* barrierp = sc->barrier;
 
-	if (tid == 0){cout<<"entering map phase"<<endl;}
+	// if (tid == 0){cout<<"entering map phase"<<endl;}
 	sc->jobState = {MAP_STAGE,0};
 
 	doMap(context);	
 	
-	if (tid==0){cout<<"entering sort phase"<<endl;}
+	// if (tid==0){cout<<"entering sort phase"<<endl;}
 	
 	sort(intermediateVec.begin(),intermediateVec.end(),[](IntermediatePair p1,IntermediatePair p2)
 		{return *(p1.first)<*(p2.first);});
 
 
 	barrierp->barrier();
-	cout<<"thread "<<tid<<" out of barrier"<<endl;
+	// cout<<"thread "<<tid<<" out of barrier"<<endl;
 
 
 	if (tid ==0){
 
 		jobState = {REDUCE_STAGE,0};
-		cout<<"entering shuffle and reduce phase"<<endl;
+		// cout<<"entering shuffle and reduce phase"<<endl;
 		// printStatus(context);
 
 		doShuffle(context);
@@ -349,8 +407,7 @@ void *doJob(void* context)
 
 	doReduce(context);
 
-
-
+	// cout<<"pthread: "<<tid<<" terminating"<<endl;
 	pthread_exit(nullptr);
 }
 
@@ -358,7 +415,7 @@ JobHandle startMapReduceJob(const MapReduceClient& client,
 	const InputVec& inputVec, OutputVec& outputVec,
 	int multiThreadLevel)
 {
-	cout<<"startMapReduceJob"<<endl;
+	// cout<<"startMapReduceJob"<<endl;
 	JobContext *jobContext = new JobContext(client,inputVec,outputVec,multiThreadLevel);
 	
 
@@ -375,22 +432,43 @@ JobHandle startMapReduceJob(const MapReduceClient& client,
 
 void waitForJob(JobHandle job)
 {
-	cout<<"waitForJob"<<endl;
+	JobContext* jc = (JobContext*)job;
+	SharedContext* sc = jc->sharedContextp;
+
+	for (int i=0;i<sc->multiThreadLevel;++i)
+	{
+		// cout<<"waiting for thread "<<i<<endl;
+		pthread_join(sc->threads_arr[i],nullptr);
+	}
+	// cout<<"all threads terminated. job done."<<endl;
+	/*
+	pthread_mutex_lock(mutexJobDonep);
+		if(!jobDone){
+			pthread_cond_wait(cvJobDonep,mutexJobDonep);
+		}
+	pthread_mutex_unlock(mutexJobDonep);
+	*/
+	// cout<<"done waitingForJob"<<endl;
+	return;
 }
 
 //currently supports only one job, jobHandle does nothing.
 void getJobState(JobHandle job, JobState* state)
 {
 		// cout<<"getJobState"<<endl;
-	JobContext* context = (JobContext *)job; 
-	*state = context->sharedContextp->jobState;
+	JobContext* jc= (JobContext *)job; 
+	SharedContext* sc = jc->sharedContextp;
+	pthread_mutex_lock(&(sc->jsMutex));
+		*state = sc->jobState;
+	pthread_mutex_unlock(&(sc->jsMutex));
 	return;
 
 }
 
 void closeJobHandle(JobHandle job)
 {
-	cout<<"closeJobHandle"<<endl;
+	waitForJob(job);
+	// cout<<"closeJobHandle"<<endl;
 	JobContext* jc = (JobContext* )job;
 	delete jc;
 	return;

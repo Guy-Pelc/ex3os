@@ -1,20 +1,47 @@
 stuff to correct:
 
 V stage 0- work with 0 threads
-stage 1-  work with one thread
-stage 2-  work with 2 threads
-stage 3- work with 3 threads
-stage 4- work with n threads
+Vstage 1-  work with one thread
+Vstage 2-  work with 2 threads
+Vstage 3- work with 3 threads
+Vstage 4- work with n threads
 
 
 stuff to check:
--using pthreads
--mutexes and cv
--atomic variable (why can there be only one?) 
--barriers
+V using pthreads
+V mutexes and cv
+V atomic variable (why can there be only one?) 
+V barriers
 
--read docs and check all is working
--read ex3 description
-- read forum questions.
--create my own client.
--ask tomer for tests
+- read docs and check all is working
+V read ex3 description
+V read forum questions.
+X create my own client.
+X ask tomer for tests
+
+- check memory leaks
+
+--------------------------
+-waitForJob - implement
+-closeJobHandle - implement
+--make sure it fails if job is not finished. consider adding FINISHED bool, and decide what is released what the job is FINISHED but before closeJobHandle is called.
+
+-jobHandle must wait until job is done.
+
+-check for system call fails and other exceptions in the functions
+
+V add semaphore for reduce phase
+
+-make sure updating job state is protected
+
+-create makefile and readme, with static library option
+
+-test mapreducejob with multiple threads
+
+-currently the job doesnt close itself and does not know when considered done. should it be different?
+
+-test with multiple jobs.
+
+-check what really needs to stay inside the mutexes
+
+

@@ -80,7 +80,9 @@ int main(int argc, char** argv)
 	JobState state;
     JobState last_state={UNDEFINED_STAGE,0};
 	JobHandle job = startMapReduceJob(client, inputVec, outputVec, 4);
+
 	getJobState(job, &state);
+    
     
 	while (state.stage != REDUCE_STAGE || state.percentage != 100.0)
 	{
@@ -95,7 +97,7 @@ int main(int argc, char** argv)
 	printf("stage %d, %f%% \n", 
 			state.stage, state.percentage);
 	printf("Done!\n");
-	
+		
 	closeJobHandle(job);
 	
 	for (OutputPair& pair: outputVec) {
