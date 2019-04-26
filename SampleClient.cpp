@@ -65,8 +65,7 @@ public:
 	}
 };
 
-
-int main(int argc, char** argv)
+void *multi(void* arg)
 {
 	CounterClient client;
 	InputVec inputVec;
@@ -109,6 +108,15 @@ int main(int argc, char** argv)
 		delete pair.second;
 	}
 	
+}
+
+int main(int argc, char** argv)
+{
+
+	pthread_create(nullptr,nullptr,multi,nullptr);
+
+	multi(nullptr);
+
 	return 0;
 }
 
