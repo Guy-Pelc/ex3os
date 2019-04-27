@@ -6,6 +6,7 @@
 #include <atomic>
 #include "Barrier.h"
 #include <semaphore.h>
+#include <stdlib.h>
 
 using namespace std;
 
@@ -51,9 +52,13 @@ public:
 
 		// cout<<"SharedContext constructor"<<endl;
 		barrier = new Barrier(multiThreadLevel);
+		if (!barrier) {cerr<<"error: mem alloc failed"; exit(1);}
+
 		intermediateVec_arr = new IntermediateVec[multiThreadLevel];
+		if (!intermediateVec_arr){cerr<<"error: mem alloc failed"; exit(1);}
 		
 		threads_arr = new pthread_t[multiThreadLevel];
+		if (!threads_arr){cerr<<"error: mem alloc failed"; exit(1);}
 
 		sem_init(&sem,0,0);	
 	}
@@ -81,8 +86,11 @@ public:
 				OutputVec& outputVec,
 				const int multiThreadLevel) {
 		sharedContextp = new SharedContext(client, inputVec,outputVec,multiThreadLevel);
+		if (!sharedContextp){cerr<<"error: mem alloc failed"; exit(1);}
 
 		threadContext_arr = new ThreadContext[multiThreadLevel];
+		if (!threadContext_arr){cerr<<"error: mem alloc failed"; exit(1);}
+
 		for (int i=0;i<multiThreadLevel;++i){
 			threadContext_arr[i] = {sharedContextp,i};
 		}
@@ -153,9 +161,9 @@ void emit3 (K3* key, V3* value, void* context){
 	
 	pthread_mutex_t* outMutexp = &(sc->outMutex);
 
-	pthread_mutex_lock(outMutexp);
+	if (pthread_mutex_lock(outMutexp)!=0) {cerr<<"error on pthread_mutex_lock"; exit(1);}
 		sc->outputVec.push_back({key,value});
-	pthread_mutex_unlock(outMutexp);
+	if (pthread_mutex_unlock(outMutexp)!=0) {cerr<<"error on pthread_mutex_unlock"; exit(1);}
 	// cout<<"end emit3"<<endl;
 }
 
@@ -196,10 +204,10 @@ void doMap(void* context)
 		if (oldVal < inputSize){
 			firstPair = inputVec[oldVal];
 			client.map(firstPair.first,firstPair.second,context);
-			pthread_mutex_lock(jsMutexp);
+			if (pthread_mutex_lock(jsMutexp)!=0){cerr<<"error on pthread_mutex_lock"; exit(1);}
 				totalMapped += 1;
 				jobState.percentage = 100*totalMapped/(float)inputVec.size();
-			pthread_mutex_unlock(jsMutexp);
+			if (pthread_mutex_unlock(jsMutexp)!=0){cerr<<"error on pthread_mutex_unlock"; exit(1);}
 		}
 		else {break;}
 	}
@@ -276,11 +284,11 @@ for (int i=0;i<sc->multiThreadLevel;++i)
 			}
 		}
 
-		pthread_mutex_lock(mutexp);
+		if (pthread_mutex_lock(mutexp)!=0){cerr<<"error on pthread_mutex_lock"; exit(1);}
 			sortedIntermediateVecs.push_back(curSortedVec);
-		pthread_mutex_unlock(mutexp);
+		if (pthread_mutex_unlock(mutexp)!=0){cerr<<"error on pthread_mutex_unlock"; exit(1);}
 		// cout<<"posting to semaphore"<<endl;
-		sem_post(sem);
+		if (sem_post(sem)!=0){cerr<<"error on sem_post";exit(1);}
 		
 		/*
 		pthread_mutex_lock(mutexp);
@@ -326,23 +334,27 @@ void doReduce(void* context){
 
 
 	while(1){	
-	sem_wait(sem);
-	if (jobState.percentage == 100) {sem_post(sem); return;}
+	if (sem_wait(sem)!=0){cerr<<"error on sem_wait";exit(1);}
+	if (jobState.percentage == 100) {
+		if (sem_post(sem)!=0){cerr<<"error on sem_post";exit(1);}
+		return;}
 
 
-	pthread_mutex_lock(mutexp);
+	if (pthread_mutex_lock(mutexp)!=0){cerr<<"error on pthread_mutex_lock"; exit(1);}
 		curIVec = sortedIntermediateVecs.back();
 		sortedIntermediateVecs.pop_back();
-	pthread_mutex_unlock(mutexp);
+	if (pthread_mutex_unlock(mutexp)!=0){cerr<<"error on pthread_mutex_unlock"; exit(1);}
 
 	curVecSize = curIVec.size();
 	client.reduce(&curIVec,context);
 
-	pthread_mutex_lock(jsMutexp);
+	if (pthread_mutex_lock(jsMutexp)!=0){cerr<<"error on pthread_mutex_lock"; exit(1);}
 		reducedIPairs += curVecSize;
 		jobState.percentage = 100*reducedIPairs/float(totalIPairs);
-	pthread_mutex_unlock(jsMutexp);
-		if (jobState.percentage == 100){sem_post(sem); return;}
+	if (pthread_mutex_unlock(jsMutexp)!=0){cerr<<"error on pthread_mutex_unlock"; exit(1);}
+		if (jobState.percentage == 100){
+			if (sem_post(sem)!=0){cerr<<"error on sem_post";exit(1);}
+			return;}
 	}
 
 	
@@ -417,6 +429,7 @@ JobHandle startMapReduceJob(const MapReduceClient& client,
 {
 	// cout<<"startMapReduceJob"<<endl;
 	JobContext *jobContext = new JobContext(client,inputVec,outputVec,multiThreadLevel);
+	if (!jobContext) {cerr<<"error with mem alloc"; exit(1);}
 	
 
 	printf("stage %d, %f%% \n", 
@@ -424,7 +437,9 @@ JobHandle startMapReduceJob(const MapReduceClient& client,
 
 	for (int i=0;i<multiThreadLevel;++i){
 		ThreadContext& tc = jobContext->threadContext_arr[i]; 
-		pthread_create(&(jobContext->sharedContextp->threads_arr[i]),nullptr, &doJob,(void*)&tc);
+		if (pthread_create(&(jobContext->sharedContextp->threads_arr[i]),nullptr, &doJob,(void*)&tc)!=0){
+			cerr<<"error with pthread_create";exit(1);
+		}
 	}
 	
 	return (void*)jobContext;
@@ -438,7 +453,7 @@ void waitForJob(JobHandle job)
 	for (int i=0;i<sc->multiThreadLevel;++i)
 	{
 		// cout<<"waiting for thread "<<i<<endl;
-		pthread_join(sc->threads_arr[i],nullptr);
+		if (pthread_join(sc->threads_arr[i],nullptr)!=0) {cerr<<"error with pthread_join";exit(1);}
 	}
 	// cout<<"all threads terminated. job done."<<endl;
 	/*
@@ -458,9 +473,11 @@ void getJobState(JobHandle job, JobState* state)
 		// cout<<"getJobState"<<endl;
 	JobContext* jc= (JobContext *)job; 
 	SharedContext* sc = jc->sharedContextp;
-	pthread_mutex_lock(&(sc->jsMutex));
+	pthread_mutex_t* jsMutexp = &(sc->jsMutex);
+
+	if(pthread_mutex_lock(jsMutexp)!=0){cerr<<"error with pthread_mutex_lock";exit(1);}
 		*state = sc->jobState;
-	pthread_mutex_unlock(&(sc->jsMutex));
+	if(pthread_mutex_unlock(jsMutexp)!=0){cerr<<"error with pthread_mutex_unlock";exit(1);}
 	return;
 
 }

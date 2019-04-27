@@ -13,7 +13,7 @@ V mutexes and cv
 V atomic variable (why can there be only one?) 
 V barriers
 
-- read docs and check all is working
+V read docs and check all is working
 V read ex3 description
 V read forum questions.
 X create my own client.
@@ -28,7 +28,7 @@ V make sure it fails if job is not finished. consider adding FINISHED bool, and 
 
 V jobHandle must wait until job is done.
 
--check for system call fails and other exceptions in the functions
+V check for system call fails and other exceptions in the functions
 
 V add semaphore for reduce phase
 
@@ -36,7 +36,7 @@ V make sure updating job state is protected
 
 -create makefile and readme, with static library option
 
--test mapreducejob with multiple threads, multiple jobs
+V test mapreducejob with multiple threads, multiple jobs
 
 V currently the job doesnt close itself and does not know when considered done. should it be different?
 
