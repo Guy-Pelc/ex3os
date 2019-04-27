@@ -67,6 +67,7 @@ public:
 
 void *multi(void* arg)
 {
+	pthread_detach(pthread_self());
 	CounterClient client;
 	InputVec inputVec;
 	OutputVec outputVec;
@@ -113,6 +114,7 @@ void *multi(void* arg)
 
 void *multi2(void* arg)
 {
+	pthread_detach(pthread_self());
 	CounterClient client;
 	InputVec inputVec;
 	OutputVec outputVec;
@@ -159,16 +161,18 @@ void *multi2(void* arg)
 
 int main(int argc, char** argv)
 {
-	// pthread_t threads[2];
+	pthread_t threads[2];
 
-	// pthread_create(&threads[0],nullptr,multi,nullptr);
-	// pthread_create(&threads[1],nullptr,multi2,nullptr);
+	// if (pthread_create(&threads[0],nullptr,multi,nullptr)!=0) {exit(1);}
+	// if (pthread_create(&threads[1],nullptr,multi2,nullptr)!=0){exit(1);}
 
 	multi(nullptr);
 
 	// pthread_join(threads[1],nullptr);
 	// pthread_join(threads[2],nullptr);
 
+	// pthread_detach(pthread_self());
+	// pthread_detach(pthread);
 	return 0;
 }
 

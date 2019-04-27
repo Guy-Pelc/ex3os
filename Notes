@@ -19,7 +19,7 @@ V read forum questions.
 X create my own client.
 X ask tomer for tests
 
-- check memory leaks with valgrind.
+V check memory leaks with valgrind.
 
 --------------------------
 V waitForJob - implement
@@ -34,7 +34,7 @@ V add semaphore for reduce phase
 
 V make sure updating job state is protected
 
--create makefile and readme, with static library option
+V create makefile and readme, with static library option
 
 V test mapreducejob with multiple threads, multiple jobs
 
