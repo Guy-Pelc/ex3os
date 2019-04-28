@@ -36,6 +36,8 @@ public:
 	pthread_mutex_t jsMutex = PTHREAD_MUTEX_INITIALIZER;
 	sem_t sem;
 
+	bool threadsTerminated = false;
+
 
 	SharedContext(
 				const MapReduceClient& client,
@@ -297,6 +299,16 @@ void *doJob(void* context){
 	IntermediateVec& intermediateVec= sc->intermediateVec_arr[tid];
 	Barrier* barrierp = sc->barrier;
 
+
+	// if input vec is empty job is done.
+	if (sc->inputVec.empty()){
+		//let only first thread update state:
+		if (tid == 0) {jobState = {REDUCE_STAGE,100};}
+		
+		pthread_exit(nullptr);
+	}
+
+
 	//map stage
 	sc->jobState = {MAP_STAGE,0};
 	doMap(context);	
@@ -340,6 +352,7 @@ JobHandle startMapReduceJob(const MapReduceClient& client,
 	JobContext *jobContext = new JobContext(client,inputVec,outputVec,multiThreadLevel);
 	if (!jobContext) {cerr<<"error with mem alloc"; exit(1);}
 	
+
 	for (int i=0;i<multiThreadLevel;++i){
 		ThreadContext& tc = jobContext->threadContext_arr[i]; 
 		if (pthread_create(&(jobContext->sharedContextp->threads_arr[i]), nullptr, &doJob,(void*)&tc) != 0){
@@ -359,10 +372,14 @@ void waitForJob(JobHandle job)
 	JobContext* jc = (JobContext*)job;
 	SharedContext* sc = jc->sharedContextp;
 
+	if (sc->threadsTerminated) {return;}
+
 	for (int i=0;i<sc->multiThreadLevel;++i)
 	{
 		if (pthread_join(sc->threads_arr[i],nullptr)!=0) {cerr<<"error with pthread_join";exit(1);}
 	}
+	sc->threadsTerminated = true;
+
 	return;
 }
 

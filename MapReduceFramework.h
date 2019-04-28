@@ -22,8 +22,6 @@ typedef struct {
 	stage_t stage;
 	float percentage;
 } JobState;
-void test();
-void test2();
 
 /**
 * This function produces a (K2*,V2*) pair.
